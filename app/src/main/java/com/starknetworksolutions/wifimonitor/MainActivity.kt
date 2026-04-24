@@ -1,10 +1,12 @@
-package com.example.wifimonitor
+package com.starknetworksolutions.wifimonitor
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -184,7 +186,7 @@ fun WifiMonitorScreen(
                     actionLabel = "Settings",
                     onAction = {
                         context.startActivity(
-                            android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                            Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
                         )
                     }
                 )
@@ -759,7 +761,8 @@ fun ControlsSection(
                         DropdownMenuItem(
                             text = {
                                 Text(label, fontFamily = Mono, fontSize = 11.sp,
-                                    color = AppColors.TextPrimary)
+                                    color = AppColors.TextPrimary
+                                )
                             },
                             onClick = { onInterval(secs); dropdownExpanded = false }
                         )
@@ -895,12 +898,15 @@ fun Divider() {
 fun WifiStateBanner(state: WifiConnectionState) {
     val (bgColor, borderColor, dotColor) = when (state) {
         WifiConnectionState.DISCONNECTED -> Triple(
-            Color(0xFF1A0A0A), AppColors.Danger.copy(alpha = 0.4f), AppColors.Danger)
+            Color(0xFF1A0A0A), AppColors.Danger.copy(alpha = 0.4f), AppColors.Danger
+        )
         WifiConnectionState.SCANNING,
         WifiConnectionState.RECONNECTING -> Triple(
-            Color(0xFF1A140A), AppColors.Warn.copy(alpha = 0.4f), AppColors.Warn)
+            Color(0xFF1A140A), AppColors.Warn.copy(alpha = 0.4f), AppColors.Warn
+        )
         else -> Triple(
-            Color(0xFF0A1A14), AppColors.Accent.copy(alpha = 0.3f), AppColors.Accent)
+            Color(0xFF0A1A14), AppColors.Accent.copy(alpha = 0.3f), AppColors.Accent
+        )
     }
     val textColor = when (state) {
         WifiConnectionState.DISCONNECTED -> AppColors.Danger
@@ -945,13 +951,13 @@ fun WifiStateBanner(state: WifiConnectionState) {
                 )
                 Text(
                     when (state) {
-                        WifiConnectionState.DISCONNECTED   -> "No WiFi association — polling continues"
-                        WifiConnectionState.SCANNING       -> "Searching for networks"
+                        WifiConnectionState.DISCONNECTED -> "No WiFi association — polling continues"
+                        WifiConnectionState.SCANNING -> "Searching for networks"
                         WifiConnectionState.AUTHENTICATING -> "Completing WPA/802.1X handshake"
-                        WifiConnectionState.ASSOCIATING    -> "Completing 802.11 association"
-                        WifiConnectionState.OBTAINING_IP   -> "Waiting for DHCP lease"
-                        WifiConnectionState.RECONNECTING   -> "Re-establishing connection"
-                        WifiConnectionState.CONNECTED      -> ""
+                        WifiConnectionState.ASSOCIATING -> "Completing 802.11 association"
+                        WifiConnectionState.OBTAINING_IP -> "Waiting for DHCP lease"
+                        WifiConnectionState.RECONNECTING -> "Re-establishing connection"
+                        WifiConnectionState.CONNECTED -> ""
                     },
                     fontFamily = Mono, fontSize = 9.sp, color = AppColors.TextMuted
                 )
@@ -975,9 +981,11 @@ fun PermissionBanner(message: String, actionLabel: String = "Grant", onAction: (
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Action required", fontFamily = Mono, fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold, color = AppColors.Warn)
+                    fontWeight = FontWeight.SemiBold, color = AppColors.Warn
+                )
                 Text(message,
-                    fontFamily = Mono, fontSize = 10.sp, color = AppColors.TextMuted)
+                    fontFamily = Mono, fontSize = 10.sp, color = AppColors.TextMuted
+                )
             }
             TextButton(onClick = onAction) {
                 Text(actionLabel, fontFamily = Mono, fontSize = 11.sp, color = AppColors.Warn)

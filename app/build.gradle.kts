@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.wifimonitor"
+    namespace = "com.starknetworksolutions.wifimonitor"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.wifimonitor"
+        applicationId = "com.starknetworksolutions.wifimonitor"
         minSdk = 26           // Android 8.0 – WifiInfo via NetworkCapabilities
         targetSdk = 35
         versionCode = 1

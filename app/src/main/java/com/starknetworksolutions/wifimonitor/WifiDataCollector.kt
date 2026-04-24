@@ -1,4 +1,4 @@
-package com.example.wifimonitor
+package com.starknetworksolutions.wifimonitor
 
 import android.Manifest
 import android.content.BroadcastReceiver
@@ -462,21 +462,21 @@ class WifiDataCollector(private val context: Context) {
 
             PollResult.Success(
                 WifiPollRecord(
-                    timestamp            = Date(),
-                    wifiState            = WifiConnectionState.CONNECTED,
-                    ssid                 = ssid,
-                    bssid                = bssid,
-                    ipAddress            = ipAddress,
-                    subnetPrefix         = subnetPrefix,
-                    defaultGateway       = defaultGateway,
-                    band                 = band,
-                    channel              = channel,
-                    rssiDbm              = rssi,
-                    noiseFloorDbm        = noiseFloor,
-                    snrDb                = snr,
+                    timestamp = Date(),
+                    wifiState = WifiConnectionState.CONNECTED,
+                    ssid = ssid,
+                    bssid = bssid,
+                    ipAddress = ipAddress,
+                    subnetPrefix = subnetPrefix,
+                    defaultGateway = defaultGateway,
+                    band = band,
+                    channel = channel,
+                    rssiDbm = rssi,
+                    noiseFloorDbm = noiseFloor,
+                    snrDb = snr,
                     signalQualityPercent = quality,
-                    pingRttMs            = pingRtt,
-                    pingSuccess          = pingSuccess
+                    pingRttMs = pingRtt,
+                    pingSuccess = pingSuccess
                 )
             )
         } catch (e: SecurityException) {

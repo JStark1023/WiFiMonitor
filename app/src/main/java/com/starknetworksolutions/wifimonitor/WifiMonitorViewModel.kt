@@ -1,4 +1,4 @@
-package com.example.wifimonitor
+package com.starknetworksolutions.wifimonitor
 
 import android.app.Application
 import android.content.Context
