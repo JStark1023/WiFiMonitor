@@ -338,8 +338,8 @@ fun PingSection(state: MonitorUiState) {
                 ) {
                     val rttColor = when {
                         rec == null || !rec.pingSuccess -> AppColors.TextMuted
-                        rec.pingRttMs < 5  -> AppColors.Accent
-                        rec.pingRttMs < 15 -> AppColors.Warn
+                        rec.pingRttMs < 100  -> AppColors.Accent
+                        rec.pingRttMs < 500 -> AppColors.Warn
                         else               -> AppColors.Danger
                     }
                     Text(
@@ -347,10 +347,23 @@ fun PingSection(state: MonitorUiState) {
                         fontFamily = Mono, fontSize = 28.sp, fontWeight = FontWeight.SemiBold,
                         color = rttColor
                     )
+
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatLabel("min", if (state.rttMin != Double.MAX_VALUE) "%.1f".format(state.rttMin) else "—", AppColors.Accent)
+                        val minColor = when {
+                            state.rttMin == Double.MAX_VALUE -> AppColors.TextMuted
+                            state.rttMin < 100  -> AppColors.Accent
+                            state.rttMin < 500  -> AppColors.Warn
+                            else                -> AppColors.Danger
+                        }
+                        val maxColor = when {
+                            state.rttMax == Double.MIN_VALUE -> AppColors.TextMuted
+                            state.rttMax < 100  -> AppColors.Accent
+                            state.rttMax < 500  -> AppColors.Warn
+                            else                -> AppColors.Danger
+                        }
+                        StatLabel("min", if (state.rttMin != Double.MAX_VALUE) "%.1f".format(state.rttMin) else "—", minColor)
                         StatLabel("avg", if (state.rttAvg > 0) "%.1f".format(state.rttAvg) else "—", AppColors.TextMuted)
-                        StatLabel("max", if (state.rttMax != Double.MIN_VALUE) "%.1f".format(state.rttMax) else "—", AppColors.Warn)
+                        StatLabel("max", if (state.rttMax != Double.MIN_VALUE) "%.1f".format(state.rttMax) else "—", maxColor)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -578,8 +591,8 @@ fun LogHeaderRow() {
 fun LogDataRow(rec: WifiPollRecord, timeFmt: SimpleDateFormat) {
     val rttColor = when {
         !rec.pingSuccess -> AppColors.Danger
-        rec.pingRttMs < 5  -> AppColors.Accent
-        rec.pingRttMs < 15 -> AppColors.Warn
+        rec.pingRttMs < 100  -> AppColors.Accent
+        rec.pingRttMs < 500 -> AppColors.Warn
         else               -> AppColors.Danger
     }
     Row(
