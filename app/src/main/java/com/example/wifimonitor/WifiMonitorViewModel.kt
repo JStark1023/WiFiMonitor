@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import java.io.OutputStreamWriter
 
 /**
@@ -63,6 +64,12 @@ class WifiMonitorViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.update { it.copy(isPolling = true, errorMessage = null) }
 
         pollJob = viewModelScope.launch {
+            // Yield once so any pending NetworkCallback.onCapabilitiesChanged
+            // that is already queued can deliver before we check state.
+            // Then re-sync synchronously in case the callback still hasn't fired.
+            yield()
+            collector.syncInitialState()
+
             while (true) {
                 when (val result = collector.poll()) {
                     is PollResult.Success -> {
