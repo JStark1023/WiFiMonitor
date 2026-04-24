@@ -2,6 +2,7 @@ package com.starknetworksolutions.wifimonitor
 
 import android.app.Application
 import android.content.Context
+import android.os.PowerManager
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -45,8 +46,25 @@ data class MonitorUiState(
 
 class WifiMonitorViewModel(application: Application) : AndroidViewModel(application) {
 
+    companion object {
+        /** Polling stops automatically once this many records have been collected. */
+        const val MAX_RECORDS = 10_000
+    }
+
     private val collector = WifiDataCollector(application)
     private var pollJob: Job? = null
+
+    // CPU wake lock — keeps the processor running while polling even after
+    // the screen is turned off by the user pressing the sleep button.
+    // The screen wake lock in MainActivity only prevents *automatic* timeout;
+    // this ensures polls continue when the user manually sleeps the device.
+    private val cpuWakeLock: PowerManager.WakeLock by lazy {
+        val pm = application.getSystemService(Context.POWER_SERVICE) as PowerManager
+        pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "WiFiMonitor:PollWakeLock"
+        ).apply { setReferenceCounted(false) }
+    }
 
     private val _uiState = MutableStateFlow(MonitorUiState())
     val uiState: StateFlow<MonitorUiState> = _uiState.asStateFlow()
@@ -61,6 +79,8 @@ class WifiMonitorViewModel(application: Application) : AndroidViewModel(applicat
 
     fun startPolling() {
         if (pollJob?.isActive == true) return
+         // Acquire CPU wake lock so polls continue even when the screen is off
+        if (!cpuWakeLock.isHeld) cpuWakeLock.acquire(/* timeout: */ 24 * 60 * 60 * 1000L) // 24 h safety timeout
         _uiState.update { it.copy(isPolling = true, errorMessage = null) }
 
         pollJob = viewModelScope.launch {
@@ -71,6 +91,15 @@ class WifiMonitorViewModel(application: Application) : AndroidViewModel(applicat
             collector.syncInitialState()
 
             while (true) {
+                                // Stop automatically when the record cap is reached
+                if (_uiState.value.records.size >= MAX_RECORDS) {
+                    stopPolling()
+                    _uiState.update {
+                        it.copy(errorMessage = "Polling stopped: reached the $MAX_RECORDS record limit.")
+                    }
+                    return@launch
+                }
+
                 when (val result = collector.poll()) {
                     is PollResult.Success -> {
                         val record = result.record
@@ -123,6 +152,7 @@ class WifiMonitorViewModel(application: Application) : AndroidViewModel(applicat
     fun stopPolling() {
         pollJob?.cancel()
         pollJob = null
+        if (cpuWakeLock.isHeld) cpuWakeLock.release()
         _uiState.update { it.copy(isPolling = false) }
     }
 

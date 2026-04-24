@@ -6,11 +6,19 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.view.WindowManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.animateFloat
@@ -41,6 +49,9 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.text.SimpleDateFormat
 import java.util.Locale
+import kotlin.math.absoluteValue
+
+
 
 class MainActivity : ComponentActivity() {
 
@@ -52,8 +63,40 @@ class MainActivity : ComponentActivity() {
             uri?.let { viewModel.exportCsv(this, it) }
         }
 
+    // ── Wake lock ──────────────────────────────────────────────────────────
+    // SCREEN_DIM_WAKE_LOCK keeps the screen on (may dim) while polling is
+    // active so the display doesn't time out due to user inactivity.
+    // The user can still press the hardware sleep button to turn the screen
+    // off manually — wake locks do not block that.
+    // Polling itself continues via a WakeLock in the ViewModel (see below)
+    // even after the screen turns off.
+    private var screenWakeLock: PowerManager.WakeLock? = null
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Keep the screen on while the window is visible and polling is active.
+        // We manage this via FLAG_KEEP_SCREEN_ON so it is automatically
+        // released when the activity is not in the foreground.
+        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onResume(owner: androidx.lifecycle.LifecycleOwner) {
+                applyScreenWakeLock()
+            }
+            override fun onPause(owner: androidx.lifecycle.LifecycleOwner) {
+                releaseScreenWakeLock()
+            }
+        })
+
+        // Re-apply whenever polling state changes (e.g. user taps Stop)
+        lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                viewModel.uiState.collect { state ->
+                    if (state.isPolling) applyScreenWakeLock()
+                    else releaseScreenWakeLock()
+                }
+            }
+        }
         setContent {
             WiFiMonitorTheme {
                 Surface(
@@ -72,7 +115,21 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /** Add FLAG_KEEP_SCREEN_ON to prevent the display timing out. */
+    private fun applyScreenWakeLock() {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    /** Remove FLAG_KEEP_SCREEN_ON so normal screen-timeout resumes. */
+    private fun releaseScreenWakeLock() {
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
 }
+
+
+
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 
