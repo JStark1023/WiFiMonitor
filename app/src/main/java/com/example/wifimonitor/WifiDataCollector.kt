@@ -72,10 +72,11 @@ class WifiDataCollector(private val context: Context) {
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.action) {
                 WifiManager.SUPPLICANT_STATE_CHANGED_ACTION -> {
+                    // getParcelableExtra(String, Class) requires API 33;
+                    // the deprecated single-arg form works on all API levels.
                     @Suppress("DEPRECATION")
-                    val supState = intent.getParcelableExtra<SupplicantState>(
-                        WifiManager.EXTRA_NEW_STATE
-                    )
+                    val supState: SupplicantState? =
+                        intent.getParcelableExtra(WifiManager.EXTRA_NEW_STATE)
                     val newState = supplicantStateToConnectionState(supState)
                     // Only apply non-connected supplicant states here;
                     // CONNECTED is driven by the NetworkCallback receiving a valid WifiInfo.
@@ -85,13 +86,27 @@ class WifiDataCollector(private val context: Context) {
                     }
                 }
                 WifiManager.NETWORK_STATE_CHANGED_ACTION -> {
-                    @Suppress("DEPRECATION")
-                    val netInfo = intent.getParcelableExtra<android.net.NetworkInfo>(
-                        WifiManager.EXTRA_NETWORK_INFO
+                    // NetworkInfo is deprecated at API 29 and removed at API 33.
+                    // We only need to know whether the link went down, which we
+                    // can detect without NetworkInfo by checking EXTRA_WIFI_STATE
+                    // (an Int constant) — no deprecated class reference needed.
+                    val wifiState = intent.getIntExtra(
+                        WifiManager.EXTRA_WIFI_STATE,
+                        WifiManager.WIFI_STATE_UNKNOWN
                     )
-                    if (netInfo != null && !netInfo.isConnected) {
-                        // Link went down — downgrade immediately so the next poll
-                        // records the right state even before the supplicant fires.
+                    val linkDown = wifiState == WifiManager.WIFI_STATE_DISABLED ||
+                            wifiState == WifiManager.WIFI_STATE_DISABLING
+                    // Also check the EXTRA_NETWORK_INFO connected flag as a
+                    // secondary signal on older API levels, guarded to avoid
+                    // the API-29 NetworkInfo deprecation warning on newer ones.
+                    val networkInfoDown = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                        @Suppress("DEPRECATION")
+                        val ni: android.net.NetworkInfo? =
+                            intent.getParcelableExtra(WifiManager.EXTRA_NETWORK_INFO)
+                        ni != null && !ni.isConnected
+                    } else false
+
+                    if (linkDown || networkInfoDown) {
                         if (currentConnectionState == WifiConnectionState.CONNECTED) {
                             currentConnectionState = WifiConnectionState.DISCONNECTED
                             Log.d(tag, "NETWORK_STATE_CHANGED: link lost → DISCONNECTED")
@@ -109,16 +124,38 @@ class WifiDataCollector(private val context: Context) {
     @Volatile private var cachedNetwork: Network? = null
     @Volatile private var callbackRegistered = false
 
-    private val networkCallback = object : ConnectivityManager.NetworkCallback(
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            FLAG_INCLUDE_LOCATION_INFO else 0
-    ) {
+    // The callback body is identical on all API levels; only the constructor
+    // argument differs.  We cannot inline the Build.VERSION check in a
+    // class-level val constructor call because the compiler evaluates the
+    // argument at class-load time and flags FLAG_INCLUDE_LOCATION_INFO
+    // (API 31+) as an error even when guarded by a runtime if-expression.
+    // Solution: define the shared behaviour in an abstract inner class, then
+    // instantiate the correct subclass inside start() where the @RequiresApi
+    // annotation can be scoped to the API-31 branch only.
+
+
+    // Remove the 'flags' parameter from this constructor to support API 26
+    private abstract inner class WifiNetworkCallback
+        : ConnectivityManager.NetworkCallback() {
+
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-            val info = caps.transportInfo as? WifiInfo
-            Log.d(tag, "NetworkCallback.onCapabilitiesChanged  SSID=${info?.ssid}  BSSID=${info?.bssid}")
+            // transportInfo requires API 29+
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                caps.transportInfo as? WifiInfo
+            } else {
+                // Fallback for API 26-28
+                @Suppress("DEPRECATION")
+                wifiManager.connectionInfo
+            }
+
+            Log.d(
+                tag,
+                "NetworkCallback.onCapabilitiesChanged  SSID=${info?.ssid}  BSSID=${info?.bssid}"
+            )
+
             cachedWifiInfo = info
-            cachedNetwork  = network
-            // If we have a real SSID the link is up — mark as connected
+            cachedNetwork = network
+
             if (info != null) {
                 val ssid = info.ssid?.removeSurrounding("\"") ?: ""
                 if (ssid.isNotBlank() && !ssid.equals("<unknown ssid>", ignoreCase = true)) {
@@ -131,30 +168,55 @@ class WifiDataCollector(private val context: Context) {
             if (network == cachedNetwork) {
                 Log.d(tag, "NetworkCallback.onLost — clearing cached WifiInfo")
                 cachedWifiInfo = null
-                cachedNetwork  = null
+                cachedNetwork = null
                 currentConnectionState = WifiConnectionState.DISCONNECTED
             }
         }
     }
 
+    // Instantiated lazily inside start(); kept nullable so stop() can null it out.
+    @Volatile private var networkCallback: WifiNetworkCallback? = null
+
     // ── Lifecycle ──────────────────────────────────────────────────────────
 
     fun start() {
-        // NetworkCallback
         if (!callbackRegistered) {
             try {
+                val cb = object : WifiNetworkCallback() {}
+                networkCallback = cb
+
                 val request = NetworkRequest.Builder()
                     .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                     .build()
-                connectivityManager.registerNetworkCallback(request, networkCallback)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // On API 31+, FLAG_INCLUDE_LOCATION_INFO goes into the
+                    // NetworkCallback constructor, not registerNetworkCallback.
+                    @Suppress("NewApi")
+                    val cbWithFlag = object : ConnectivityManager.NetworkCallback(
+                        ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO
+                    ) {
+                        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                            cb.onCapabilitiesChanged(network, caps)
+                        }
+                        override fun onLost(network: Network) {
+                            cb.onLost(network)
+                        }
+                    }
+                    networkCallback = cbWithFlag as? WifiNetworkCallback  // keep reference for stop()
+                    connectivityManager.registerNetworkCallback(request, cbWithFlag)
+                } else {
+                    // API 26–30: standard 2-parameter registration, no flag needed.
+                    connectivityManager.registerNetworkCallback(request, cb)
+                }
+
+
                 callbackRegistered = true
-                Log.d(tag, "NetworkCallback registered")
+                Log.d(tag, "NetworkCallback registered (API ${Build.VERSION.SDK_INT})")
             } catch (e: Exception) {
                 Log.e(tag, "Failed to register NetworkCallback: ${e.message}")
             }
         }
 
-        // Broadcast receiver for supplicant / network-state events
         if (!receiverRegistered) {
             try {
                 val filter = IntentFilter().apply {
@@ -170,12 +232,65 @@ class WifiDataCollector(private val context: Context) {
                 Log.e(tag, "Failed to register BroadcastReceiver: ${e.message}")
             }
         }
+        syncInitialState()
+    }
+
+
+    /**
+     * Synchronously inspect the current WiFi state so [currentConnectionState]
+     * is accurate before the first poll fires, without waiting for the
+     * [networkCallback] to deliver its first [ConnectivityManager.NetworkCallback.onCapabilitiesChanged].
+     *
+     * On API 31+ we read transportInfo from the active network's capabilities.
+     * On API 26-30 we read the supplicant state directly from [WifiManager].
+     * In both cases we only set CONNECTED if we can confirm a real, non-redacted
+     * SSID is present; otherwise we leave the state as-is so it gets corrected
+     * by the first incoming callback/broadcast.
+     */
+    /**
+     * Synchronously seed [currentConnectionState] from whatever is connected
+     * right now.  Call this just before the first poll so the initial state
+     * is correct without waiting for the async [networkCallback] to fire.
+     *
+     * Safe to call multiple times (idempotent when already CONNECTED).
+     */
+    fun syncInitialState() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Look for any active WiFi transport — deliberately omit
+                // NET_CAPABILITY_INTERNET so captive portals and enterprise
+                // networks without internet still count as connected.
+                val wifiNet = connectivityManager.allNetworks.firstOrNull { net ->
+                    connectivityManager.getNetworkCapabilities(net)
+                        ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                }
+                if (wifiNet != null) {
+                    currentConnectionState = WifiConnectionState.CONNECTED
+                    cachedNetwork = wifiNet
+                    Log.d(tag, "syncInitialState: WiFi transport found → CONNECTED")
+                } else {
+                    Log.d(tag, "syncInitialState: no WiFi transport found")
+                }
+            } else {
+                // API 26-30: supplicant state is reliable and synchronous
+                @Suppress("DEPRECATION")
+                val supState = wifiManager.connectionInfo?.supplicantState
+                val connState = supplicantStateToConnectionState(supState)
+                if (connState == WifiConnectionState.CONNECTED) {
+                    currentConnectionState = WifiConnectionState.CONNECTED
+                }
+                Log.d(tag, "syncInitialState: supplicantState=$supState → $connState")
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "syncInitialState failed (non-fatal): ${e.message}")
+        }
     }
 
     fun stop() {
         if (callbackRegistered) {
             try {
-                connectivityManager.unregisterNetworkCallback(networkCallback)
+                networkCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
+                networkCallback = null
                 callbackRegistered = false
                 cachedWifiInfo = null
                 cachedNetwork  = null
@@ -247,16 +362,24 @@ class WifiDataCollector(private val context: Context) {
         val linkProps: LinkProperties?
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            wifiInfo  = cachedWifiInfo
+            // Android 12+: Use the cached info from the callback (which used the FLAG)
+            wifiInfo = cachedWifiInfo
             linkProps = cachedNetwork?.let { connectivityManager.getLinkProperties(it) }
-            Log.d(tag, "  source: NetworkCallback cache")
-        } else {
+            Log.d(tag, "  source: NetworkCallback cache (API 31+)")
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10-11: Use cached info or direct wifiManager
             @Suppress("DEPRECATION")
-            wifiInfo  = wifiManager.connectionInfo
-            linkProps = getWifiLinkPropertiesLegacy()
-            Log.d(tag, "  source: WifiManager.connectionInfo (legacy)")
+            wifiInfo = cachedWifiInfo ?: wifiManager.connectionInfo
+            linkProps = cachedNetwork?.let { connectivityManager.getLinkProperties(it) }
+            Log.d(tag, "  source: Mixed Cache/WifiManager (API 29-30)")
+        } else {
+            // Android 8-9: Use legacy WifiManager
+            @Suppress("DEPRECATION")
+            wifiInfo = wifiManager.connectionInfo
+            linkProps =
+                connectivityManager.activeNetwork?.let { connectivityManager.getLinkProperties(it) }
+            Log.d(tag, "  source: Legacy WifiManager (API 26-28)")
         }
-
         Log.d(tag, "  rawSSID:    \"${wifiInfo?.ssid}\"")
         Log.d(tag, "  BSSID:      ${wifiInfo?.bssid}")
         Log.d(tag, "  Frequency:  ${wifiInfo?.frequency} MHz")
@@ -377,7 +500,6 @@ class WifiDataCollector(private val context: Context) {
             SupplicantState.ASSOCIATED            -> WifiConnectionState.ASSOCIATING
             SupplicantState.FOUR_WAY_HANDSHAKE,
             SupplicantState.GROUP_HANDSHAKE       -> WifiConnectionState.AUTHENTICATING
-            //SupplicantState.OBTAINING_IPADDR      -> WifiConnectionState.OBTAINING_IP
             SupplicantState.SCANNING              -> WifiConnectionState.SCANNING
             SupplicantState.DISCONNECTED,
             SupplicantState.DORMANT,

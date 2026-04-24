@@ -2,11 +2,9 @@ package com.example.wifimonitor
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,7 +39,6 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.text.SimpleDateFormat
 import java.util.Locale
-import kotlin.math.absoluteValue
 
 class MainActivity : ComponentActivity() {
 
@@ -134,7 +131,7 @@ fun WifiMonitorScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             locationManager.isLocationEnabled
         } else {
-            @Suppress("DEPRECATION")
+            //@Suppress("DEPRECATION")
             locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
                     locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
         }
@@ -193,8 +190,9 @@ fun WifiMonitorScreen(
                 )
             }
 
-            // WiFi state banner — shown when polling but not connected
-            if (state.isPolling && !state.wifiState.isConnected) {
+            // WiFi state banner — only shown after the first poll has completed
+            // so we never flash a false "Disconnected" on startup.
+            if (state.isPolling && state.pollCount > 0 && !state.wifiState.isConnected) {
                 WifiStateBanner(state.wifiState)
             }
 
@@ -340,8 +338,8 @@ fun PingSection(state: MonitorUiState) {
                 ) {
                     val rttColor = when {
                         rec == null || !rec.pingSuccess -> AppColors.TextMuted
-                        rec.pingRttMs < 25  -> AppColors.Accent
-                        rec.pingRttMs < 50 -> AppColors.Warn
+                        rec.pingRttMs < 5  -> AppColors.Accent
+                        rec.pingRttMs < 15 -> AppColors.Warn
                         else               -> AppColors.Danger
                     }
                     Text(
@@ -580,8 +578,8 @@ fun LogHeaderRow() {
 fun LogDataRow(rec: WifiPollRecord, timeFmt: SimpleDateFormat) {
     val rttColor = when {
         !rec.pingSuccess -> AppColors.Danger
-        rec.pingRttMs < 25  -> AppColors.Accent
-        rec.pingRttMs < 50 -> AppColors.Warn
+        rec.pingRttMs < 5  -> AppColors.Accent
+        rec.pingRttMs < 15 -> AppColors.Warn
         else               -> AppColors.Danger
     }
     Row(
